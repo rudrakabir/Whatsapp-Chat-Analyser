@@ -138,5 +138,5 @@ def main(file_path):
     print(output)
 
 if __name__ == "__main__":
-    file_path = "path_to_your_chat_file.txt"  # Replace with the actual file path
+    file_path = ""  # Replace with the actual file path
     main(file_path)
