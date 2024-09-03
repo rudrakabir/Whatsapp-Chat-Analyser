@@ -36,11 +36,11 @@ def analyze_chat(messages):
 
     # Top emojis used
     all_emojis = [char for _, _, msg in messages for char in msg if char in emoji.EMOJI_DATA]
-    results['top_emojis'] = Counter(all_emojis).most_common(10)
+    results['top_emojis'] = Counter(all_emojis).most_common(20)
 
     # Top words used
     all_words = [word.lower() for _, _, msg in messages for word in re.findall(r'\w+', msg)]
-    results['top_words'] = Counter(all_words).most_common(10)
+    results['top_words'] = Counter(all_words).most_common(20)
 
     # Time of day messaging
     results['morning_messaging'] = Counter(date.hour for date, _, _ in messages if 0 <= date.hour < 12)
