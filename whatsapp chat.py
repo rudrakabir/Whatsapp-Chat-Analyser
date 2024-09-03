@@ -1,142 +1,129 @@
 import re
 from collections import Counter
-from datetime import datetime
+from datetime import datetime, timedelta
 import emoji
 
 def parse_chat(file_path):
     with open(file_path, 'r', encoding='utf-8') as file:
         content = file.read()
     
-    # Regular expression to match the date, time, sender, and message
-    pattern = r'(\d{1,2}/\d{1,2}/\d{2,4}),\s(\d{1,2}:\d{2})\s-\s([^:]+):\s(.+)'
-    messages = re.findall(pattern, content, re.MULTILINE)
+    pattern = r'\[(\d{1,2}/\d{1,2}/\d{2}, \d{1,2}:\d{2}:\d{2})\] (.+?): (.+)'
+    matches = re.findall(pattern, content)
     
-    return [
-        {
-            'date': datetime.strptime(date + ' ' + time, '%d/%m/%Y %H:%M'),
-            'sender': sender.strip(),
-            'message': message.strip()
-        }
-        for date, time, sender, message in messages
-    ]
+    parsed_messages = []
+    for date_str, sender, message in matches:
+        try:
+            date = datetime.strptime(date_str, '%d/%m/%y, %H:%M:%S')
+        except ValueError:
+            try:
+                date = datetime.strptime(date_str, '%m/%d/%y, %H:%M:%S')
+            except ValueError:
+                print(f"Skipping message with invalid date format: {date_str}")
+                continue
+        parsed_messages.append((date, sender, message))
+    
+    return parsed_messages
 
 def analyze_chat(messages):
-    results = {
-        'message_count': Counter(),
-        'day_of_week': Counter(),
-        'emojis': Counter(),
-        'words': Counter(),
-        'time_of_day_morning': Counter(),
-        'time_of_day_afternoon': Counter(),
-        'time_spent': Counter(),
-        'phrase_frequency': 0,
-        'first_encounter': None,
-        'laugh_counter': 0,
-        'date_range': {'start': None, 'end': None}
-    }
+    results = {}
 
-    all_senders = set()
-    for msg in messages:
-        sender = msg['sender']
-        all_senders.add(sender)
-        date = msg['date']
-        message = msg['message']
+    # Message count per user
+    results['message_count'] = Counter(sender for _, sender, _ in messages)
 
-        # Message count
-        results['message_count'][sender] += 1
+    # Messages by day of the week
+    days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+    results['messages_by_day'] = Counter(days[date.weekday()] for date, _, _ in messages)
 
-        # Day of week
-        results['day_of_week'][date.strftime('%A')] += 1
+    # Top emojis used
+    all_emojis = [char for _, _, msg in messages for char in msg if char in emoji.EMOJI_DATA]
+    results['top_emojis'] = Counter(all_emojis).most_common(10)
 
-        # Emojis
-        emojis = [c for c in message if c in emoji.EMOJI_DATA]
-        results['emojis'].update(emojis)
+    # Top words used
+    all_words = [word.lower() for _, _, msg in messages for word in re.findall(r'\w+', msg)]
+    results['top_words'] = Counter(all_words).most_common(10)
 
-        # Words
-        words = message.lower().split()
-        results['words'].update(words)
+    # Time of day messaging
+    results['morning_messaging'] = Counter(date.hour for date, _, _ in messages if 0 <= date.hour < 12)
+    results['afternoon_evening_messaging'] = Counter(date.hour for date, _, _ in messages if 12 <= date.hour < 24)
 
-        # Time of day
-        hour = date.hour
-        if 0 <= hour < 12:
-            results['time_of_day_morning'][hour] += 1
-        else:
-            results['time_of_day_afternoon'][hour] += 1
+    # Time spent messaging (assuming 1 minute per message)
+    results['time_spent'] = {sender: timedelta(minutes=count) for sender, count in results['message_count'].items()}
 
-        # Phrase frequency
-        if "i love you" in message.lower():
-            results['phrase_frequency'] += 1
-
-        # Laugh counter
-        if re.search(r'\b(haha|lol|lmao|😂)\b', message.lower()):
-            results['laugh_counter'] += 1
-
-        # Date range
-        if results['date_range']['start'] is None or date < results['date_range']['start']:
-            results['date_range']['start'] = date
-        if results['date_range']['end'] is None or date > results['date_range']['end']:
-            results['date_range']['end'] = date
+    # Phrase frequency
+    phrase = "I love you"
+    results['phrase_frequency'] = sum(1 for _, _, msg in messages if phrase.lower() in msg.lower())
 
     # First encounter
-    if len(all_senders) == 2:
-        sender1, sender2 = list(all_senders)
-        for msg in messages:
-            if msg['sender'] in [sender1, sender2]:
-                if results['first_encounter'] is None:
-                    results['first_encounter'] = []
-                results['first_encounter'].append(f"{msg['sender']}: {msg['message']}")
-                if len(results['first_encounter']) == 2:
-                    break
+    results['first_encounter'] = messages[:2]
+
+    # Laugh counter
+    laugh_patterns = r'\b(haha|lol|lmao|rofl|😂|🤣)\b'
+    results['laugh_counter'] = sum(1 for _, _, msg in messages if re.search(laugh_patterns, msg, re.IGNORECASE))
+
+    # Date range
+    results['date_range'] = (messages[0][0], messages[-1][0])
 
     return results
 
 def format_results(results):
-    output = []
+    output = "Chat Analysis Results\n\n"
 
-    output.append("Message count per user:")
+    output += "Message count per user:\n"
     for user, count in results['message_count'].items():
-        output.append(f"{user}: {count}")
+        output += f"{user}: {count}\n"
+    output += "\n"
 
-    output.append("\nMessages by day of the week:")
-    for day, count in results['day_of_week'].items():
-        output.append(f"{day}: {count}")
+    output += "Messages by day of the week:\n"
+    for day, count in results['messages_by_day'].items():
+        output += f"{day}: {count}\n"
+    output += "\n"
 
-    output.append("\nTop emojis used:")
-    for emoji, count in results['emojis'].most_common(5):
-        output.append(f"{emoji}: {count}")
+    output += "Top emojis used:\n"
+    for emoji, count in results['top_emojis']:
+        output += f"{emoji}: {count}\n"
+    output += "\n"
 
-    output.append("\nTop words used:")
-    for word, count in results['words'].most_common(10):
-        output.append(f"{word}: {count}")
+    output += "Top words used:\n"
+    for word, count in results['top_words']:
+        output += f"{word}: {count}\n"
+    output += "\n"
 
-    output.append("\nTime of day messaging (morning):")
+    output += "Time of day messaging (morning):\n"
     for hour in range(12):
-        output.append(f"{hour}:00 - {hour+1}:00: {results['time_of_day_morning'][hour]}")
+        output += f"{hour:02d}:00 - {hour:02d}:59: {results['morning_messaging'][hour]}\n"
+    output += "\n"
 
-    output.append("\nTime of day messaging (afternoon/evening):")
+    output += "Time of day messaging (afternoon/evening):\n"
     for hour in range(12, 24):
-        output.append(f"{hour}:00 - {(hour+1)%24}:00: {results['time_of_day_afternoon'][hour]}")
+        output += f"{hour:02d}:00 - {hour:02d}:59: {results['afternoon_evening_messaging'][hour]}\n"
+    output += "\n"
 
-    output.append(f"\nPhrase frequency ('I love you'): {results['phrase_frequency']}")
+    output += "Time spent messaging:\n"
+    for user, time in results['time_spent'].items():
+        output += f"{user}: {time}\n"
+    output += "\n"
 
-    if results['first_encounter']:
-        output.append("\nFirst encounter:")
-        output.extend(results['first_encounter'])
+    output += f"Phrase frequency ('I love you'): {results['phrase_frequency']}\n\n"
 
-    output.append(f"\nLaugh counter: {results['laugh_counter']}")
+    output += "First encounter:\n"
+    for date, sender, message in results['first_encounter']:
+        output += f"[{date}] {sender}: {message}\n"
+    output += "\n"
 
-    output.append("\nDate range:")
-    output.append(f"Start: {results['date_range']['start'].strftime('%Y-%m-%d %H:%M')}")
-    output.append(f"End: {results['date_range']['end'].strftime('%Y-%m-%d %H:%M')}")
+    output += f"Laugh counter: {results['laugh_counter']}\n\n"
 
-    return "\n".join(output)
+    output += f"Date range: {results['date_range'][0]} to {results['date_range'][1]}\n"
 
-def main(file_path):
-    messages = parse_chat(file_path)
-    results = analyze_chat(messages)
-    output = format_results(results)
-    print(output)
+    return output
 
-if __name__ == "__main__":
-    file_path = ""  # Replace with the actual file path
-    main(file_path)
+# Main execution
+file_path = 'samplechat.txt'  # Replace with the actual file path
+messages = parse_chat(file_path)
+results = analyze_chat(messages)
+formatted_results = format_results(results)
+
+print(formatted_results)
+
+# Optionally, save the results to a file
+with open('chat_analysis_results.txt', 'w', encoding='utf-8') as file:
+    file.write(formatted_results)
