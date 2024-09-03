@@ -7,22 +7,27 @@ def parse_chat(file_path):
     with open(file_path, 'r', encoding='utf-8') as file:
         content = file.read()
     
-    pattern = r'\[(\d{1,2}/\d{1,2}/\d{2}, \d{1,2}:\d{2}:\d{2})\] (.+?): (.+)'
-    matches = re.findall(pattern, content)
+    pattern = r'(\[\d{1,2}/\d{1,2}/\d{2,4},\s\d{1,2}:\d{2}:\d{2}\])\s(.+?):\s([\s\S]*?)(?=\n\[\d{1,2}/\d{1,2}/\d{2,4},\s\d{1,2}:\d{2}:\d{2}\]|$)'
+    matches = re.findall(pattern, content, re.DOTALL)
     
     parsed_messages = []
     for date_str, sender, message in matches:
         try:
-            date = datetime.strptime(date_str, '%d/%m/%y, %H:%M:%S')
+            date = datetime.strptime(date_str, '[%d/%m/%y, %H:%M:%S]')
         except ValueError:
             try:
-                date = datetime.strptime(date_str, '%m/%d/%y, %H:%M:%S')
+                date = datetime.strptime(date_str, '[%m/%d/%y, %H:%M:%S]')
             except ValueError:
                 print(f"Skipping message with invalid date format: {date_str}")
                 continue
-        parsed_messages.append((date, sender, message))
+        parsed_messages.append((date, sender, message.strip()))
+    
+    # Debug: Print all parsed messages
+    for date, sender, message in parsed_messages:
+        print(f"Parsed message:\nDate: {date}\nSender: {sender}\nMessage: {message}\n")
     
     return parsed_messages
+
 
 def analyze_chat(messages):
     results = {}
@@ -49,16 +54,40 @@ def analyze_chat(messages):
     # Time spent messaging (assuming 1 minute per message)
     results['time_spent'] = {sender: timedelta(minutes=count) for sender, count in results['message_count'].items()}
 
-    # Phrase frequency
-    phrase = "I love you"
-    results['phrase_frequency'] = sum(1 for _, _, msg in messages if phrase.lower() in msg.lower())
+    # Phrase frequency (updated)
+    love_phrases = [
+        r'\bi\s*love\s*you',  # English
+        r'आई\s*लव\s*यू',      # Hindi (transliteration)
+        r'मैं\s*तुमसे\s*प्यार\s*करता\s*हूं',  # Hindi
+        r'मैं\s*तुमसे\s*प्यार\s*करती\s*हूं',  # Hindi (feminine)
+    ]
+    love_pattern = '|'.join(love_phrases)
+    
+    def count_love_phrases(msg):
+        print(f"Analyzing message: {msg[:100]}...") # Debug print
+        count = len(re.findall(love_pattern, msg, re.IGNORECASE | re.UNICODE))
+        print(f"Direct matches found: {count}") # Debug print
+        
+        # Check for "I love you" in script-like content
+        script_lines = re.findall(r'(?:^|\n).*?:.*?(?:\n|$)', msg, re.MULTILINE)
+        for line in script_lines:
+            print(f"Checking script line: {line.strip()}") # Debug print
+            if re.search(love_pattern, line, re.IGNORECASE | re.UNICODE):
+                count += 1
+                print(f"Match found in script line, new count: {count}") # Debug print
+        
+        return count
+
+    results['phrase_frequency'] = sum(count_love_phrases(msg) for _, _, msg in messages)
+    print(f"Total phrase frequency: {results['phrase_frequency']}") # Debug print
+
 
     # First encounter
     results['first_encounter'] = messages[:2]
 
     # Laugh counter
-    laugh_patterns = r'\b(haha|lol|lmao|rofl|😂|🤣)\b'
-    results['laugh_counter'] = sum(1 for _, _, msg in messages if re.search(laugh_patterns, msg, re.IGNORECASE))
+    laugh_patterns = r'\b(haha|lol|lmao|rofl)\b|😂|🤣'
+    results['laugh_counter'] = sum(len(re.findall(laugh_patterns, msg, re.IGNORECASE)) for _, _, msg in messages)
 
     # Date range
     results['date_range'] = (messages[0][0], messages[-1][0])
